@@ -8,7 +8,7 @@ import {
   Camera, Cpu, Trophy, Palette, Dumbbell, HeartHandshake, LoaderCircle
 } from 'lucide-react';
 
-const API = 'http://localhost:5001/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 const LOCAL_SIH_KEY = 'campusly_local_sih_events';
 
 const categories = [
