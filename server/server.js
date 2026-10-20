@@ -14,6 +14,40 @@ app.use(cors({
 
 app.use(express.json());
 
+// MongoDB connection management
+let mongoConnectionPromise;
+
+async function connectToDatabase() {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  if (!process.env.MONGO_URI) {
+    throw new Error('MONGO_URI environment variable is missing');
+  }
+
+  if (!mongoConnectionPromise) {
+    mongoConnectionPromise = mongoose
+      .connect(process.env.MONGO_URI)
+      .catch((error) => {
+        mongoConnectionPromise = null;
+        throw error;
+      });
+  }
+
+  await mongoConnectionPromise;
+}
+
+// Connect to MongoDB before handling API requests
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Club Schema
 const clubSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -53,12 +87,17 @@ const memberSchema = new mongoose.Schema({
 memberSchema.index({ email: 1, club: 1 }, { unique: true });
 
 // Models
-const Club = mongoose.model('Club', clubSchema);
-const Event = mongoose.model('Event', eventSchema);
-const Member = mongoose.model('Member', memberSchema);
+const Club = mongoose.models.Club ||
+  mongoose.model('Club', clubSchema);
+
+const Event = mongoose.models.Event ||
+  mongoose.model('Event', eventSchema);
+
+const Member = mongoose.models.Member ||
+  mongoose.model('Member', memberSchema);
 
 // Health Check
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     database: mongoose.connection.readyState === 1
@@ -68,7 +107,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Dashboard
-app.get('/api/dashboard', async (_req, res, next) => {
+app.get('/api/dashboard', async (req, res, next) => {
   try {
     const [clubs, members, events, upcomingEvents] = await Promise.all([
       Club.countDocuments(),
@@ -78,25 +117,25 @@ app.get('/api/dashboard', async (_req, res, next) => {
     ]);
 
     res.json({ clubs, members, events, upcomingEvents });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 // Clubs
-app.get('/api/clubs', async (_req, res, next) => {
+app.get('/api/clubs', async (req, res, next) => {
   try {
     res.json(await Club.find().sort({ createdAt: -1 }));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 app.post('/api/clubs', async (req, res, next) => {
   try {
     res.status(201).json(await Club.create(req.body));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -113,8 +152,8 @@ app.put('/api/clubs/:id', async (req, res, next) => {
     }
 
     res.json(item);
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -127,28 +166,25 @@ app.delete('/api/clubs/:id', async (req, res, next) => {
     }
 
     res.json({ message: 'Club deleted' });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 // Events
-app.get('/api/events', async (_req, res, next) => {
+app.get('/api/events', async (req, res, next) => {
   try {
     res.json(await Event.find().sort({ date: 1 }));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 app.post('/api/events', async (req, res, next) => {
   try {
-    // Temporary diagnostic: inspect the incoming event data
-    console.log('EVENT REQUEST BODY:', req.body);
-
     res.status(201).json(await Event.create(req.body));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -165,8 +201,8 @@ app.put('/api/events/:id', async (req, res, next) => {
     }
 
     res.json(item);
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -179,25 +215,25 @@ app.delete('/api/events/:id', async (req, res, next) => {
     }
 
     res.json({ message: 'Event deleted' });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 // Members
-app.get('/api/members', async (_req, res, next) => {
+app.get('/api/members', async (req, res, next) => {
   try {
     res.json(await Member.find().sort({ createdAt: -1 }));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 app.post('/api/members', async (req, res, next) => {
   try {
     res.status(201).json(await Member.create(req.body));
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -210,13 +246,13 @@ app.delete('/api/members/:id', async (req, res, next) => {
     }
 
     res.json({ message: 'Member removed' });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 // Error Handling
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, next) => {
   console.error(err);
 
   if (err.code === 11000) {
@@ -234,22 +270,25 @@ app.use((err, _req, res, _next) => {
   }
 
   res.status(500).json({
-    message: 'Server error. Check the backend terminal and MongoDB connection.'
+    message: 'Server error. Check the backend logs and MongoDB connection.'
   });
 });
 
-// Start Server and Connect to MongoDB Atlas
-const PORT = process.env.PORT || 5000;
+// Local development server
+const PORT = process.env.PORT || 5001;
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log('MongoDB connected');
-
-    app.listen(PORT, () => {
-      console.log(`API running at http://localhost:${PORT}`);
+if (!process.env.VERCEL) {
+  connectToDatabase()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`API running at http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error('MongoDB connection failed:', error.message);
+      process.exit(1);
     });
-  })
-  .catch(err => {
-    console.error('MongoDB connection failed:', err.message);
-    process.exit(1);
-  });
+}
+
+// Vercel serverless entry point
+export default app;
